@@ -6,9 +6,22 @@ This repo contains GPT-2 (124M) from scratch, modified and edited from this [rep
 
 # 3. Repo Layout
 `experiment` contains the training, testing, and text generation files for GPT-2.
+
+
 `models` contains the GPT-2 model, along with its DataLoader.
+
+
 `utils` contains helper functions for HellaSwag, setting seed for reproducibility, and parameter counts.
+
+
 `logs` contains the train, validation, and HellaSwag evaluation for different models.
+
+
 `config.py` contains the GPT-2 and training hyper/parameters.
+
+
 `main.py` contains a simple test run.
+
+
 `run.ipynb` will contain all the results.
+
