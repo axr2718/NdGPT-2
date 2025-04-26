@@ -1,105 +1,39 @@
+from models.gpt2 import GPT2, GPTDataLoader
+from config import GPT2Config, TrainConfig
 import torch
-import torchvision
-from torchvision.transforms import v2
-from models.ndvit import NdVisionTransformer
-from models.vit import VisionTransformer
-import torch.nn as nn
-from experiment.train import train
-from experiment.test import test
-from utils.parameter_count import parameter_count
+from experiment.train import train_gpt2
+from utils.set_seed import set_seed
+
 
 torch.set_float32_matmul_precision('high')
 
-if __name__ == '__main__':
-
+if '__main__' == __name__:
     seed = 42
-    torch.manual_seed(seed=seed)
-    torch.cuda.manual_seed_all(seed=seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    set_seed(seed)
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f'Using device: {device}')
 
-    transform = torchvision.transforms.Compose([v2.Resize((224, 224)),
-                                                v2.ToImage(),
-                                                v2.ToDtype(torch.uint8, scale=True),
-                                                v2.ToDtype(torch.float32, scale=True),
-                                                v2.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))])
+    model_config = GPT2Config()
+    train_config = TrainConfig()
 
+    dataset_dir = './data/edu_fineweb10B'
 
-    train_dataset = torchvision.datasets.CIFAR10(root='./data', 
-                                                      train=True,
-                                                      transform=transform,
-                                                      download=False)
+    B = train_config.B
+    T = train_config.T
 
-    test_dataset = torchvision.datasets.CIFAR10(root='./data',
-                                                     train=False,
-                                                     transform=transform,
-                                                     download=False)
+    trainloader = GPTDataLoader(B=B, T=T, dir_path=dataset_dir)
+    valloader = GPTDataLoader(B=B, T=T, dir_path=dataset_dir, split='val')
 
-    num_classes = len(train_dataset.classes)
-
-    model = VisionTransformer(num_classes=num_classes,
-                              patch_size=16,
-                              embed_dim=384,
-                              depth=12,
-                              mlp_ratio=4.0,
-                              num_heads=6)
-    
-    num_params = parameter_count(model)
-
-    print(f'Testing ViT-S Patch 16 with {num_params} parameters.')
-    model.to(device)
+    model = GPT2(config=model_config)
     model = torch.compile(model)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001,fused=True)
+    model.eval()
+    model.to(device=device)
 
-    trained_model = train(model=model,
-                          train_dataset=train_dataset,
-                          criterion=criterion,
-                          optimizer=optimizer,
-                          epochs=20,
-                          batch_size=32)
-    
-    metrics = test(model=model,
-                   test_dataset=test_dataset,
-                   device=device)
-    
-    acc = metrics['accuracy']
-    precision = metrics['precision']
-    recall = metrics['recall']
-    f1 = metrics['f1']
-    print(f'Accuracy: {acc * 100:.4f} | Precision {precision* 100:.4f} | Recall {recall* 100:.4f} | F1: {f1* 100:.4f}')
+    optimizer = torch.optim.AdamW(model.parameters(), lr=train_config.max_lr, fused=True)
 
-    
-    model = NdVisionTransformer(num_classes=num_classes,
-                              patch_size=16,
-                              embed_dim=384,
-                              depth=12,
-                              mlp_ratio=0.5,
-                              num_heads=6,)
-                              #use_ndlinear=True)
-    num_params = parameter_count(model)
-    print(f'Testing NdViT-S Patch 16 with {num_params} parameters.')
-    model.to(device)
-    model = torch.compile(model)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001,fused=True)
-
-    trained_model = train(model=model,
-                          train_dataset=train_dataset,
-                          criterion=criterion,
-                          optimizer=optimizer,
-                          epochs=20,
-                          batch_size=32)
-    
-    metrics = test(model=model,
-                   test_dataset=test_dataset,
-                   device=device)
-    
-    acc = metrics['accuracy']
-    precision = metrics['precision']
-    recall = metrics['recall']
-    f1 = metrics['f1']
-    print(f'Accuracy: {acc * 100:.4f} | Precision {precision* 100:.4f} | Recall {recall* 100:.4f} | F1: {f1* 100:.4f}')
+    trained_model = train_gpt2(model=model,
+                               trainloader=trainloader,
+                               valloader=valloader,
+                               optimizer=optimizer,
+                               train_config=train_config)
