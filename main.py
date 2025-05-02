@@ -1,4 +1,5 @@
-from models.gpt2 import GPT2, GPTDataLoader
+from models.gpt2 import GPTDataLoader
+from models.ndgpt2 import NdGPT2
 from config import GPT2Config, TrainConfig
 import torch
 from experiment.train import train_gpt2
@@ -25,7 +26,7 @@ if '__main__' == __name__:
     trainloader = GPTDataLoader(B=B, T=T, dir_path=dataset_dir)
     valloader = GPTDataLoader(B=B, T=T, dir_path=dataset_dir, split='val')
 
-    model = GPT2(config=model_config)
+    model = NdGPT2(config=model_config)
     model = torch.compile(model)
     model.eval()
     model.to(device=device)

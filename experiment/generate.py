@@ -13,7 +13,7 @@ def generate_text(model: nn.Module):
 
     encoding = tiktoken.get_encoding('gpt2')
     # Will it convince EnsembleAI to hire me?
-    tokens = encoding.encode("This is my machine learning project for the EnsembleAI internship application, and they should")
+    tokens = encoding.encode("This is my machine learning project for the EnsembleAI internship application. Should they hire me?")
     tokens = torch.tensor(tokens, dtype=torch.long)
     tokens = tokens.unsqueeze(0).repeat(return_sequences, 1)
 

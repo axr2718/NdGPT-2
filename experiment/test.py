@@ -13,6 +13,7 @@ from sklearn.metrics import (accuracy_score,
 
 @torch.inference_mode()
 def evaluate_gpt2(model: nn.Module,
+                  optimizer: torch.optim.Optimizer,
                   valloader: GPTDataLoader,
                   step: int,
                   last_step:int,
@@ -43,8 +44,9 @@ def evaluate_gpt2(model: nn.Module,
     if (step > 0) and (step % 500 == 0 or last_step):
         checkpoint_dir = 'checkpoints'
         os.makedirs(checkpoint_dir, exist_ok=True)
-        checkpoint_path = os.path.join(checkpoint_dir, f'model_{step:05d}.pt')
+        checkpoint_path = os.path.join(checkpoint_dir, f'ndgpt2_{step:05d}.pt')
         checkpoint = {'model': model.state_dict(),
+                      'optimizer': optimizer.state_dict(),
                       'config': model.config,
                       'step': step,
                       'val_loss': val_loss.item()}

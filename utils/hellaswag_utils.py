@@ -50,7 +50,7 @@ def render_example(example: dir) -> Tuple[Dict[str,Any], torch.LongTensor, torch
     for end in endings:
         end_tokens = encoding.encode(' ' + end)
         tok_rows.append(ctx_tokens + end_tokens)
-        mask_rows.append([0] * len(ctx_tokens + [1] * len(end_tokens)))
+        mask_rows.append([0] * len(ctx_tokens) + [1] * len(end_tokens))
         data['ending_tokens'].append(end_tokens)
 
     max_len = max(len(row) for row in tok_rows)

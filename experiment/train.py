@@ -17,7 +17,7 @@ def train_gpt2(model: nn.Module,
                ) -> nn.Module:
     log_dir = 'logs'
     os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, 'gpt2-log.txt')
+    log_file = os.path.join(log_dir, 'ndgpt2-log.txt')
     with open(log_file, 'w') as file:
         pass
 
@@ -43,11 +43,12 @@ def train_gpt2(model: nn.Module,
 
         return min_lr + coeff * (max_lr - min_lr)
     
-    for step in range(max_steps):
+    for step in range(3087, max_steps):
         last_step = (step == max_steps - 1)
 
         if (step % 250 ==0) or last_step:
             evaluate_gpt2(model=model,
+                          optimizer=optimizer,
                           valloader=valloader,
                           step=step,
                           last_step=last_step,
