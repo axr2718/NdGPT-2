@@ -6,7 +6,7 @@ from config import GPT2Config
 import numpy as np
 from typing import Tuple
 
-class CausalSelfAttention(nn.Module):
+class Attention(nn.Module):
     def __init__(self, config: GPT2Config) -> nn.Module:
         super().__init__()
         assert config.embed_dim % config.num_heads == 0
@@ -17,16 +17,16 @@ class CausalSelfAttention(nn.Module):
         self.embed_dim = config.embed_dim
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        B, T, C = x.size()
+        batch_size, seq_len, dim = x.size()
 
         qkv = self.attn(x)
         q, k, v = qkv.split(self.embed_dim, dim=2)
-        q = q.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
-        k = k.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
-        v = v.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
+        q = q.view(batch_size, seq_len, self.num_heads, dim // self.num_heads).transpose(1, 2)
+        k = k.view(batch_size, seq_len, self.num_heads, dim // self.num_heads).transpose(1, 2)
+        v = v.view(batch_size, seq_len, self.num_heads, dim // self.num_heads).transpose(1, 2)
 
         y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
-        y = y.transpose(1, 2).contiguous().view(B, T, C)
+        y = y.transpose(1, 2).contiguous().view(batch_size, seq_len, dim)
         y = self.proj(y)
 
         return y
@@ -50,7 +50,7 @@ class Block(nn.Module):
     def __init__(self, config: GPT2Config) -> nn.Module:
         super().__init__()
         self.norm1 = nn.LayerNorm(config.embed_dim)
-        self.attn = CausalSelfAttention(config)
+        self.attn = Attention(config)
         self.norm2 = nn.LayerNorm(config.embed_dim)
         self.mlp = MLP(config)
 
@@ -66,11 +66,13 @@ class GPT2(nn.Module):
         self.config = config
         self.scale = scale
 
-        self.transformer = nn.ModuleDict(dict(wte = nn.Embedding(config.vocab_size, config.embed_dim),
-                                              wpe = nn.Embedding(config.block_size, config.embed_dim),
-                                              h = nn.ModuleList([Block(config) for _ in range(config.num_layers)]),
-                                              ln_f = nn.LayerNorm(config.embed_dim),))
-        
+        self.transformer = nn.ModuleDict({
+            'wte': nn.Embedding(config.vocab_size, config.embed_dim),
+            'wpe': nn.Embedding(config.max_seq_len, config.embed_dim),
+            'h': nn.ModuleList([Block(config) for _ in range(config.num_layers)]),
+            'norm': nn.LayerNorm(config.embed_dim)
+            })
+
         self.head = nn.Linear(config.embed_dim, config.vocab_size, bias=False)
 
         self.transformer.wte.weight = self.head.weight
@@ -91,19 +93,19 @@ class GPT2(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, idx: torch.Tensor, targets=None) -> torch.Tensor:
-        B, T = idx.size()
-        assert T <= self.config.block_size, "Cannot compute"
+    def forward(self, input: torch.Tensor, targets=None) -> torch.Tensor:
+        batch_size, seq_len = input.size()
+        assert seq_len <= self.config.max_seq_len, "Sequence length exceeded maximum sequence length."
         
-        pos = torch.arange(0, T, dtype=torch.long, device=idx.device)
-        pos_emb = self.transformer.wpe(pos)
-        tok_emb = self.transformer.wte(idx)
-        x = pos_emb + tok_emb
+        positions = torch.arange(0, seq_len, dtype=torch.long, device=input.device)
+        positional_embedding = self.transformer.wpe(positions)
+        token_embedding = self.transformer.wte(input)
+        x = positional_embedding + token_embedding
 
         for block in self.transformer.h:
             x = block(x)
 
-        x = self.transformer.ln_f(x)
+        x = self.transformer.norm(x)
         logits = self.head(x)
 
         loss = None
