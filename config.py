@@ -10,8 +10,11 @@ class GPT2Config:
 
 @dataclass
 class TrainConfig:
+    model_name: str = 'GPT2'
     dataset_dir: str = './data/edu_fineweb10B'
     seed: int = 13
+
+    epochs: int = 5
     max_lr: float = 6e-4
     min_lr: float = max_lr * 0.1
     warmup_steps: int = 715

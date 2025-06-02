@@ -18,14 +18,17 @@ def train_gpt2(
 
     warmup_steps = train_config.warmup_steps
     max_lr = train_config.max_lr
-    max_steps = train_config.max_steps
     min_lr = train_config.min_lr
-    grad_steps: int = train_config.max_batch_size // (train_config.batch_size * train_config.seq_len)
+    grad_steps = train_config.max_batch_size // (train_config.batch_size * train_config.seq_len)
     start_step = train_config.start_step
+
+    steps_per_epoch = train_loader.max_steps // grad_steps
+    max_steps = steps_per_epoch
+    total_steps = steps_per_epoch * train_config.epochs
 
     log_dir = train_config.log_dir
     os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, f'{model.__class__.__name__}-log.txt')
+    log_path = os.path.join(log_dir, f'{train_config.model_name}-log.txt')
 
     if not os.path.exists(log_path):
         with open(log_path, 'w') as file:
@@ -50,7 +53,7 @@ def train_gpt2(
 
         return min_lr + coeff * (max_lr - min_lr)
     
-    for step in range(start_step, max_steps):
+    for step in range(start_step, total_steps):
         last_step = (step == max_steps - 1)
 
         if (step % 250 ==0) or last_step:
@@ -62,7 +65,7 @@ def train_gpt2(
 
             if (step > 0) and (step % 500 == 0 or last_step):
                 train_config.start_step = step
-                checkpoint_path = os.path.join(checkpoint_dir, f'{model.__class__.__name__}_{step:05d}.pt')
+                checkpoint_path = os.path.join(checkpoint_dir, f'{train_config.model_name}_{step:05d}.pt')
                 checkpoint = {
                     'model': model.state_dict(),
                     'optimizer': optimizer.state_dict(),
