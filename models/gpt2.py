@@ -1,20 +1,19 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import os
 from config import GPT2Config
-import numpy as np
-from typing import Tuple
 
 class Attention(nn.Module):
     def __init__(self, config: GPT2Config) -> nn.Module:
         super().__init__()
         assert config.embed_dim % config.num_heads == 0
 
-        self.attn = nn.Linear(config.embed_dim, 3 * config.embed_dim)
-        self.proj = nn.Linear(config.embed_dim, config.embed_dim)
-        self.num_heads = config.num_heads
         self.embed_dim = config.embed_dim
+        self.num_heads = config.num_heads
+
+
+        self.attn = nn.Linear(self.embed_dim, 3 * self.embed_dim)
+        self.proj = nn.Linear(self.embed_dim, self.embed_dim)
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch_size, seq_len, dim = x.size()
@@ -25,77 +24,92 @@ class Attention(nn.Module):
         k = k.view(batch_size, seq_len, self.num_heads, dim // self.num_heads).transpose(1, 2)
         v = v.view(batch_size, seq_len, self.num_heads, dim // self.num_heads).transpose(1, 2)
 
-        y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
-        y = y.transpose(1, 2).contiguous().view(batch_size, seq_len, dim)
-        y = self.proj(y)
+        x = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        x = x.transpose(1, 2).contiguous().view(batch_size, seq_len, dim)
+        x = self.proj(x)
 
-        return y
+        return x
 
 
 class MLP(nn.Module):
     def __init__(self, config: GPT2Config) -> nn.Module:
         super().__init__()
-        self.fc1 = nn.Linear(config.embed_dim, 4 * config.embed_dim)
+        self.embed_dim = config.embed_dim
+
+        self.fc1 = nn.Linear(self.embed_dim, 4 * self.embed_dim)
         self.gelu = nn.GELU()
-        self.fc2 = nn.Linear(4 * config.embed_dim, config.embed_dim)
+        self.fc2 = nn.Linear(4 * self.embed_dim, self.embed_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.fc1(x)
         x = self.gelu(x)
         x = self.fc2(x)
+
         return x
 
 
 class Block(nn.Module):
     def __init__(self, config: GPT2Config) -> nn.Module:
         super().__init__()
-        self.norm1 = nn.LayerNorm(config.embed_dim)
+        self.embed_dim = config.embed_dim
+
+        self.norm1 = nn.LayerNorm(self.embed_dim)
         self.attn = Attention(config)
-        self.norm2 = nn.LayerNorm(config.embed_dim)
+        self.norm2 = nn.LayerNorm(self.embed_dim)
         self.mlp = MLP(config)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.attn(self.norm1(x))
         x = x + self.mlp(self.norm2(x))
+
         return x
 
 
 class GPT2(nn.Module):
-    def __init__(self, config: GPT2Config, scale=True) -> nn.Module:
+    def __init__(self, config: GPT2Config) -> nn.Module:
         super().__init__()
         self.config = config
-        self.scale = scale
+
+        self.vocab_size = config.vocab_size
+        self.embed_dim = config.embed_dim
+        self.max_seq_len = config.max_seq_len
+        self.num_layers = config.num_layers
 
         self.transformer = nn.ModuleDict({
-            'wte': nn.Embedding(config.vocab_size, config.embed_dim),
-            'wpe': nn.Embedding(config.max_seq_len, config.embed_dim),
-            'h': nn.ModuleList([Block(config) for _ in range(config.num_layers)]),
-            'norm': nn.LayerNorm(config.embed_dim)
+            'wte': nn.Embedding(self.vocab_size, self.embed_dim),
+            'wpe': nn.Embedding(self.max_seq_len, self.embed_dim),
+            'h': nn.ModuleList([Block(config) for _ in range(self.num_layers)]),
+            'norm': nn.LayerNorm(self.embed_dim)
             })
 
-        self.head = nn.Linear(config.embed_dim, config.vocab_size, bias=False)
+        self.head = nn.Linear(self.embed_dim, self.vocab_size, bias=False)
 
         self.transformer.wte.weight = self.head.weight
 
         self.apply(self._init_params)
 
-    def _init_params(self, module: nn.Module) -> None:
+    def _init_params(self, module):
+        mean = 0.0
+        std = 0.02
+        residual_scale = (2 * self.num_layers) ** -0.5
+
         if isinstance(module, nn.Linear):
-            std=0.02
-
-            # CHECK SCALE
-            if self.scale:
-                std *= (2 * self.config.num_layers)**-0.5
-                torch.nn.init.normal_(module.weight, mean=0.0, std=std)
-            else: torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            nn.init.normal_(module.weight, mean=mean, std=std)
             if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
+                nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            nn.init.normal_(module.weight, mean=mean, std=std)
+        elif isinstance(module, Attention) or isinstance(module, MLP):
+            for submodule in module.modules():
+                if isinstance(submodule, nn.Linear):
+                    nn.init.normal_(submodule.weight, mean=mean, std=std*residual_scale)
+                    if submodule.bias is not None:
+                        nn.init.zeros_(submodule.bias)
 
-    def forward(self, input: torch.Tensor, targets=None) -> torch.Tensor:
-        batch_size, seq_len = input.size()
-        assert seq_len <= self.config.max_seq_len, "Sequence length exceeded maximum sequence length."
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        _, seq_len = input.size()
+        assert seq_len <= self.max_seq_len, "Sequence length exceeded maximum sequence length."
         
         positions = torch.arange(0, seq_len, dtype=torch.long, device=input.device)
         positional_embedding = self.transformer.wpe(positions)
@@ -108,53 +122,4 @@ class GPT2(nn.Module):
         x = self.transformer.norm(x)
         logits = self.head(x)
 
-        loss = None
-
-        if targets is not None:
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
-
-        return logits, loss
-    
-class GPTDataLoader():
-    def __init__(self, B: int, T: int, dir_path: str, split: str = 'train') -> None:
-        self.B = B
-        self.T = T
-
-        assert split in {'train', 'val'}
-        
-        shards = os.listdir(dir_path)
-        shards = [shard for shard in shards if split in shard]
-        shards = sorted(shards)
-        shards = [os.path.join(dir_path, shard) for shard in shards]
-        self.shards = shards
-
-        assert len(shards) > 0, "No shards found"
-
-        self._reset()
-
-    def _load_tokens(self, filename: str):
-        npt = np.load(filename)
-        npt = npt.astype(np.int32)
-        ptt = torch.tensor(npt, dtype=torch.long)
-
-        return ptt
-    
-    def _reset(self):
-        self.current_shard = 0
-        self.tokens = self._load_tokens(self.shards[self.current_shard])
-        self.position = self.B * self.T
-
-    def get_batch(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        B, T = self.B, self.T
-        buffer = self.tokens[self.position : self.position + B * T + 1]
-        x = buffer[:-1].view(B, T)
-        y = buffer[1:].view(B, T)
-
-        self.position += B * T
-
-        if self.position + (B * T + 1) > len(self.tokens):
-            self.current_shard = (self.current_shard + 1) % len(self.shards)
-            self.tokens = self._load_tokens(self.shards[self.current_shard])
-            self.position = B * T 
-
-        return x, y
+        return logits

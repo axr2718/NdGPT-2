@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import tiktoken
 
 @torch.inference_mode()
-def generate_text(model: nn.Module):
+def generate_text(model: nn.Module, seed: int):
     model.eval()
     device = next(model.parameters()).device
 
@@ -12,19 +12,17 @@ def generate_text(model: nn.Module):
     max_length = 32
 
     encoding = tiktoken.get_encoding('gpt2')
-    # Will it convince EnsembleAI to hire me?
-    tokens = encoding.encode("This is my machine learning project for the EnsembleAI internship application. Should they hire me?")
+    tokens = encoding.encode("Hello, I'm a language model,")
     tokens = torch.tensor(tokens, dtype=torch.long)
     tokens = tokens.unsqueeze(0).repeat(return_sequences, 1)
 
     gen = tokens.to(device)
     rng = torch.Generator(device=device)
-    rng.manual_seed(42)
-
+    rng.manual_seed(seed)
     while gen.size(1) < max_length:
         with torch.no_grad():
             with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
-                logits, loss = model(gen)
+                logits = model(gen)
 
             logits = logits[:, -1, :]
 

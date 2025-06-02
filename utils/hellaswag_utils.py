@@ -6,8 +6,8 @@ import json
 from typing import Iterator, Dict, Any, Tuple
 
 def get_row(tokens: torch.LongTensor, mask: torch.LongTensor, logits: torch.Tensor) -> int:
-    shift_logits = logits[..., :-1, :].contiguous()
-    shift_tokens = tokens[..., 1:].contiguous()
+    shift_logits = (logits[..., :-1, :]).contiguous()
+    shift_tokens = (tokens[..., 1:]).contiguous()
 
     flat_shift_logits = shift_logits.view(-1, shift_logits.size(-1))
     flat_shift_tokens = shift_tokens.view(-1)
@@ -15,7 +15,7 @@ def get_row(tokens: torch.LongTensor, mask: torch.LongTensor, logits: torch.Tens
     shift_losses = F.cross_entropy(flat_shift_logits, flat_shift_tokens, reduction='none')
     shift_losses = shift_losses.view(tokens.size(0), -1)
     
-    shift_mask = mask[..., 1:].contiguous()
+    shift_mask = (mask[..., 1:]).contiguous()
     masked_shift_losses = shift_losses * shift_mask
 
     sum_loss = masked_shift_losses.sum(dim=1)
@@ -38,9 +38,11 @@ def render_example(example: dir) -> Tuple[Dict[str,Any], torch.LongTensor, torch
     label = example['label']
     endings = example['endings']
 
-    data =  {'label': label,
-             'ctx_tokens': None,
-             'ending_tokens': []}
+    data =  {
+        'label': label,
+        'ctx_tokens': None,
+        'ending_tokens': []
+        }
     
     ctx_tokens = encoding.encode(ctx)
     data['ctx_tokens'] = ctx_tokens

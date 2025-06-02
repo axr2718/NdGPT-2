@@ -17,11 +17,13 @@ After training is done, we print out some statistics to compare it to GPT-2 and 
 
 Lastly, we prune each model with [Wanda](https://arxiv.org/abs/2306.11695) and compare the number of parameters and one-shot performance on HellaSwag.
 
+
 ## Repo Layout
-`experiment` contains the text generation, GPT training, and GPT testing (validation, HellaSwag evaluation), and train/test for a ViT that is not used.
+`experiment` contains the text generation, GPT training, and GPT testing (validation, HellaSwag evaluation), and train/test for a ViT that is not used. `train.py` also contains the cosine learning rate decay function used to train NdGPT-2.
 
 
 `models` contains GPT-2 from OpenAI, NdGPT-2, ViT, and NdViT. Note that both vision transformers were not used, but the code is there if you are interested in looking.
+
 
 `pruning` contains the Wanda pruning algorithm code.
 
