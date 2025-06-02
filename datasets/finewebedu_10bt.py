@@ -11,8 +11,9 @@ class FineWebEdu10BT:
         dir_path: str, 
         split: str = 'train'
     ) -> None:
-        self.B = batch_size
-        self.T = seq_len
+        
+        self.batch_size = batch_size
+        self.seq_len = seq_len
 
         assert split in {'train', 'val'}
         
@@ -39,29 +40,29 @@ class FineWebEdu10BT:
         self.position = 0
 
     def get_batch(self) -> Tuple[torch.Tensor, torch.LongTensor]:
-        B, T = self.B, self.T
+        batch_size, seq_len = self.batch_size, self.seq_len
 
-        if self.position + (B * T + 1) > len(self.tokens):
+        if self.position + (batch_size * seq_len + 1) > len(self.tokens):
             self.current_shard = (self.current_shard + 1) % len(self.shards)
             self.tokens = self._load_tokens(self.shards[self.current_shard])
             self.position = 0
 
-            if len(self.tokens) < (B * T + 1):
+            if len(self.tokens) < (batch_size * seq_len + 1):
                 return self.get_batch()
 
-        buffer = self.tokens[self.position : self.position + B * T + 1]
-        x = buffer[:-1].view(B, T)
-        y = buffer[1:].view(B, T)
+        buffer = self.tokens[self.position : self.position + batch_size * seq_len + 1]
+        x = buffer[:-1].view(batch_size, seq_len)
+        y = buffer[1:].view(batch_size, seq_len)
 
-        self.position += B * T
+        self.position += batch_size * seq_len
         return x, y
 
     def steps_per_epoch(self) -> int:
         max_steps = 0
         
         for shard_path in self.shards:
-            arr = np.load(shard_path)
-            L = arr.shape[0]
-            max_steps += (L - 1) // (self.B * self.T)
+            tokens = np.load(shard_path)
+            num_tokens = tokens.shape[0]
+            max_steps += (num_tokens - 1) // (self.batch_size * self.seq_len)
 
         return max_steps

@@ -18,7 +18,6 @@ class TrainConfig:
     max_lr: float = 6e-4
     min_lr: float = max_lr * 0.1
     warmup_steps: int = 715
-    max_steps: int = 19073
     weight_decay: float = 0.1
 
     max_batch_size: int = 524288
