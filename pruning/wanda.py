@@ -1,7 +1,7 @@
 # Algorithm taken from https://arxiv.org/abs/2306.11695
 import torch
 import torch.nn as nn
-from ndlinear import NdLinear
+from ndlinear_file import NdLinear
 
 def prune_linear_layer(layer: nn.Linear, X: torch.Tensor, sparsity: float):
     W = layer.weight.data 

@@ -46,8 +46,8 @@ class MLP(nn.Module):
             self.fc1 = nn.Linear(self.embed_dim, 4 * self.embed_dim)
             self.fc2 = nn.Linear(4 * self.embed_dim, self.embed_dim)
         else: 
-            self.fc1 = NdLinear(input_dims=(self.embed_dim, 1), hidden_size=(2 * self.embed_dim, 8))
-            self.fc2 = NdLinear(input_dims=(2 * self.embed_dim, 8), hidden_size=(self.embed_dim, 1))
+            self.fc1 = NdLinear(input_dims=(1, self.d2), hidden_size=(1, self.d2))
+            self.fc2 = NdLinear(input_dims=(1, self.d2), hidden_size=(1, self.d2))
 
         self.gelu = nn.GELU()
 
@@ -59,7 +59,7 @@ class MLP(nn.Module):
             x = self.gelu(x)
             x = self.fc2(x)
         else: 
-            x = x.view(batch_size*seq_len, embed_dim, 1)
+            x = x.view(batch_size*seq_len, 1, embed_dim)
             x = self.fc1(x)
             x = self.gelu(x)
             x = self.fc2(x)

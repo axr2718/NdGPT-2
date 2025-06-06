@@ -5,8 +5,10 @@ import torch
 import torch.nn as nn
 from experiment.train import train_gpt2
 from utils.set_seed import set_seed
+from utils.parameter_count import parameter_count
 
 torch.set_float32_matmul_precision('high')
+
 
 if '__main__' == __name__:
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -29,6 +31,8 @@ if '__main__' == __name__:
     val_loader = FineWebEdu10BT(batch_size=batch_size, seq_len=seq_len, dir_path=dataset_dir, split='val')
 
     model = GPT2(config=model_config)
+    num_params = parameter_count(model=model)
+    print(f"Number of parameters for this model is {num_params}")
 
     decay_params = []
     nodecay_params = []

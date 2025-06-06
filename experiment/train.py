@@ -63,13 +63,15 @@ def train_gpt2(
             with open(log_path, 'a') as file:
                 file.write(f'{step} val {val_loss:.4f}\n')
 
-            if (step > 0) and (step % 500 == 0 or last_step):
+            if (step > 0) and (step % 1500 == 0 or last_step):
                 train_config.start_step = step
                 checkpoint_path = os.path.join(checkpoint_dir, f'{train_config.model_name}_{step:05d}.pt')
                 checkpoint = {
                     'model': model.state_dict(),
                     'optimizer': optimizer.state_dict(),
-                    'train_config': train_config
+                    'start_step': step,
+                    'epochs': train_config.epochs,
+                    'model_name': train_config.model_name
                     }
                 torch.save(checkpoint, checkpoint_path)
             
