@@ -110,14 +110,14 @@ def train_gpt2(
                     # ckpt = {
                     #     'step': step + 1,
                     #     'optimization_step': optimization_step + 1,
-                    #     'model': model.state_dict(),
+                    #     'model': model.module.state_dict(),
                     #     'optimizer': optimizer.state_dict(),
                     #     'dataloader': dataloader.state_dict(),
                     # }
 
                     # ckpt_dir = f'./checkpoints/models/{train_config.model_name}'
                     # os.makedirs(ckpt_dir, exist_ok=True)
-                    # save_ckpt_path = os.path.join(ckpt_dir, f'{train_config.model_name}_{optimization_step:05d}.pt')
+                    # save_ckpt_path = os.path.join(ckpt_dir, f'{train_config.model_name}.pt')
                     # torch.save(ckpt, save_ckpt_path)
 
                     model.eval()    
