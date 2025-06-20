@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from config import GPT2Config
-from ndlinear_file import NdLinear
+from ndlinear import NdLinear
 
 class Attention(nn.Module):
     def __init__(self, config: GPT2Config) -> nn.Module:
@@ -36,18 +36,17 @@ class MLP(nn.Module):
     def __init__(self, config: GPT2Config) -> nn.Module:
         super().__init__()
         self.embed_dim = config.embed_dim
-        self.d1 = config.max_seq_len
-        self.d2 = config.embed_dim
-        self.h1 = config.h1
-        self.h2 = h2 = 1536
+        self.intermediate_size = config.intermediate_size
+        self.filter_size = config.filter_size
+
         self.use_ndlinear = config.use_ndlinear
 
         if not self.use_ndlinear:
-            self.fc1 = nn.Linear(self.embed_dim, 4 * self.embed_dim)
-            self.fc2 = nn.Linear(4 * self.embed_dim, self.embed_dim)
+            self.fc1 = nn.Linear(self.embed_dim, self.intermediate_size)
+            self.fc2 = nn.Linear(self.intermediate_size, self.embed_dim)
         else: 
-            self.fc1 = NdLinear(input_dims=(self.embed_dim, 1), hidden_size=(2 * self.embed_dim, 8))
-            self.fc2 = NdLinear(input_dims=(2 * self.embed_dim, 8), hidden_size=(self.embed_dim, 1))
+            self.fc1 = NdLinear((self.embed_dim, 1), (self.intermediate_size, self.filter_size))
+            self.fc2 = NdLinear((self.intermediate_size, self.filter_size), (self.embed_dim, 1))
 
         self.gelu = nn.GELU()
 
@@ -59,10 +58,12 @@ class MLP(nn.Module):
             x = self.gelu(x)
             x = self.fc2(x)
         else: 
-            x = x.view(batch_size*seq_len, embed_dim, 1)
+            x = x.view(-1, x.size(-1))
+            x = x.unsqueeze(-1)
             x = self.fc1(x)
             x = self.gelu(x)
             x = self.fc2(x)
+            #x.squeeze(-1)
             return x.view(batch_size, seq_len, embed_dim)  
         return x
 

@@ -1,118 +1,143 @@
 import torch
 import torch.nn as nn
-from datasets.finewebedu_10bt import FineWebEdu10BT
+from torch.utils.data import DataLoader
 from config import TrainConfig
-import math
 import os
-from .test import evaluate_gpt2, evaluate_hellaswag
+from .test import evaluate_hellaswag
 from .generate import generate_text
+from utils.cosine_decay_with_warmup import cosine_decay_with_warmup
+from transformers import AutoTokenizer
+import time
+import math
 
 def train_gpt2(
         model: nn.Module,
-        train_loader: FineWebEdu10BT,
-        val_loader: FineWebEdu10BT,
+        dataloader: DataLoader,
         optimizer: torch.optim.Optimizer,
         criterion: nn.Module,
-        train_config: TrainConfig
+        tokenizer: AutoTokenizer,
+        train_config: TrainConfig,
+        rank: int = 0,
+        world_size: int = 0
         ) -> nn.Module:
-
+    
     warmup_steps = train_config.warmup_steps
     max_lr = train_config.max_lr
     min_lr = train_config.min_lr
-    grad_steps = train_config.max_batch_size // (train_config.batch_size * train_config.seq_len)
-    start_step = train_config.start_step
-
-    steps_per_epoch = train_loader.max_steps // grad_steps
-    max_steps = steps_per_epoch
-    total_steps = steps_per_epoch * train_config.epochs
-
-    log_dir = train_config.log_dir
-    os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, f'{train_config.model_name}-log.txt')
-
-    if not os.path.exists(log_path):
-        with open(log_path, 'w') as file:
-            pass
-
-    checkpoint_dir = train_config.checkpoint_dir
-    os.makedirs(checkpoint_dir, exist_ok=True)
+    max_steps = train_config.max_steps
+    gradient_accumulation_steps = math.ceil(train_config.gradient_accumulation_steps // world_size)
+    start_step = 0
+    optimization_step = 0
     
+    if rank == 0:
+        last_step = (optimization_step == max_steps - 1)
+
+        print(f'Backward pass at each {gradient_accumulation_steps} steps for {train_config.max_tokens} tokens, given {train_config.batch_size * train_config.seq_len * world_size} tokens per step')
+        
+        log_dir = train_config.log_dir
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, f'{train_config.model_name}-log.txt')
+
+        if not os.path.exists(log_path):
+            with open(log_path, 'w') as file:
+                pass
+
+        checkpoint_dir = train_config.checkpoint_dir
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        
     device = next(model.parameters()).device
-    
-    def get_lr(it: int) -> float:
-        if it < warmup_steps:
-            return max_lr * (it + 1) / warmup_steps
-        
-        if it > max_steps:
-            return min_lr
-        
-        decay_ratio = (it - warmup_steps) / (max_steps - warmup_steps)
 
-        assert 0 <= decay_ratio <= 1
-        coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+    optimizer.zero_grad() 
+    total_loss = 0
+    tokens_processed = 0
+    start_time = time.time()
 
-        return min_lr + coeff * (max_lr - min_lr)
-    
-    for step in range(start_step, total_steps):
-        last_step = (step == max_steps - 1)
-
-        if (step % 250 ==0) or last_step:
-            val_loss = evaluate_gpt2(model=model, criterion=criterion, val_loader=val_loader)
-            print(f'Validation Loss {val_loss:.4f}')
-
-            with open(log_path, 'a') as file:
-                file.write(f'{step} val {val_loss:.4f}\n')
-
-            if (step > 0) and (step % 1500 == 0 or last_step):
-                train_config.start_step = step
-                checkpoint_path = os.path.join(checkpoint_dir, f'{train_config.model_name}_{step:05d}.pt')
-                checkpoint = {
-                    'model': model.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    'start_step': step,
-                    'epochs': train_config.epochs,
-                    'model_name': train_config.model_name
-                    }
-                torch.save(checkpoint, checkpoint_path)
-            
-        if (step % 250 == 0 or last_step):
-            num_correct, num_total = evaluate_hellaswag(model=model)
-            acc = num_correct / num_total
-            print(f'HellaSwag accuracy: {num_correct}/{num_total} = {acc:.4f}')
-
-            with open(log_path, 'a') as file:
-                file.write(f'{step} hella {acc:.4f}\n')
-            
-        if ((step > 0 and step % 250 == 0) or last_step):
-            generate_text(model=model, seed=train_config.seed)
-        
+    for step, batch in enumerate(dataloader, start=start_step):
         model.train()
-        total_loss = 0.0
-        optimizer.zero_grad()
-        
-        for grad_step in range(grad_steps):
-            x, y = train_loader.get_batch()
-            x, y = x.to(device), y.to(device)
 
-            with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
-                logits = model(x)
-                loss = criterion(logits.view(-1, logits.size(-1)), y.view(-1))
+        input_ids = batch['input_ids'].to(device)
 
-            loss /= grad_steps
-            total_loss += loss.detach()
+        tokens_processed += input_ids.numel()
+
+        with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
+            logits = model(input_ids)
+            logits = logits[:, :-1].contiguous()
+            targets = input_ids[:, 1:].contiguous()
+            loss = criterion(logits.view(-1, logits.size(-1)), targets.view(-1))
+            loss /= gradient_accumulation_steps
+
+
+        if (step + 1) % gradient_accumulation_steps == 0:
             loss.backward()
+            norm = nn.utils.clip_grad_norm_(model.parameters(), 1.0)
 
-        norm = nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimization_step += 1
+            lr = cosine_decay_with_warmup(step=optimization_step, warmup_steps=warmup_steps, max_steps=max_steps, max_lr=max_lr,min_lr=min_lr)
+        
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = lr
 
-        lr = get_lr(step)
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
+            optimizer.step()
+            optimizer.zero_grad()
 
-        optimizer.step()
+            if device == "cuda":
+                torch.cuda.synchronize()
 
-        print(f'Step {step} | Loss {total_loss.item():.4f} | lr {lr:.6f} | Norm {norm:.4f}')
+            end_time = time.time()
+            total_time = end_time - start_time
 
-        with open(log_path, 'a') as file:
-            file.write(f'{step} train {total_loss.item():.6f}\n')
+            tokens_per_sec = tokens_processed / total_time
+            
+            if train_config.use_ddp:
+                torch.distributed.all_reduce(total_loss, op=torch.distributed.ReduceOp.AVG)
 
-    return model
+            if rank == 0:
+                print(
+                    f"Step: {optimization_step + 1} | "
+                    f"Loss: {total_loss.item():.4f} | "
+                    f"LR: {lr:.4e} | "
+                    f"Norm: {norm:.4f} | "
+                    f"Tokens/Second: {tokens_per_sec * world_size:.2f} | "
+                    f"Using NdLinear: {train_config.use_ndlinear}"
+                    )
+                
+                with open(log_path, 'a') as file:
+                    file.write(f'{optimization_step} train {total_loss.item():.6f}\n')
+            
+            #optimization_step += 1
+
+                if optimization_step % 100 == 0:
+                    # ckpt = {
+                    #     'step': step + 1,
+                    #     'optimization_step': optimization_step + 1,
+                    #     'model': model.state_dict(),
+                    #     'optimizer': optimizer.state_dict(),
+                    #     'dataloader': dataloader.state_dict(),
+                    # }
+
+                    # ckpt_dir = f'./checkpoints/models/{train_config.model_name}'
+                    # os.makedirs(ckpt_dir, exist_ok=True)
+                    # save_ckpt_path = os.path.join(ckpt_dir, f'{train_config.model_name}_{optimization_step:05d}.pt')
+                    # torch.save(ckpt, save_ckpt_path)
+
+                    model.eval()    
+                    with torch.no_grad():
+                        if (optimization_step > 0 or last_step):
+                            generate_text(model=model, tokenizer=tokenizer)
+
+                    hellaswag_accuracy = evaluate_hellaswag(model)
+                    
+                    print(f'HellaSwag accuracy: {hellaswag_accuracy * 100: .2f}')
+                    with open(log_path, 'a') as file:
+                        file.write(f'{optimization_step} hella {hellaswag_accuracy:.4f}\n')
+
+            total_loss = 0
+            tokens_processed = 0
+            start_time = time.time()
+        else:
+            total_loss += loss.detach()
+            with model.no_sync():
+                loss.backward()
+
+            norm = nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
