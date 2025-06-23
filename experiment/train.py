@@ -66,6 +66,7 @@ def train_gpt2(
             loss = criterion(logits.view(-1, logits.size(-1)), targets.view(-1))
             loss /= gradient_accumulation_steps
 
+        total_loss += loss.detach()
 
         if (step + 1) % gradient_accumulation_steps == 0:
             loss.backward()
@@ -93,7 +94,7 @@ def train_gpt2(
 
             if rank == 0:
                 print(
-                    f"Step: {optimization_step + 1} | "
+                    f"Step: {optimization_step} | "
                     f"Loss: {total_loss.item():.4f} | "
                     f"LR: {lr:.4e} | "
                     f"Norm: {norm:.4f} | "
@@ -107,18 +108,18 @@ def train_gpt2(
             #optimization_step += 1
 
                 if optimization_step % 100 == 0:
-                    # ckpt = {
-                    #     'step': step + 1,
-                    #     'optimization_step': optimization_step + 1,
-                    #     'model': model.module.state_dict(),
-                    #     'optimizer': optimizer.state_dict(),
-                    #     'dataloader': dataloader.state_dict(),
-                    # }
+                    ckpt = {
+                        'step': step + 1,
+                        'optimization_step': optimization_step + 1,
+                        'model': model.module.state_dict(),
+                        'optimizer': optimizer.state_dict(),
+                        'dataloader': dataloader.state_dict(),
+                    }
 
-                    # ckpt_dir = f'./checkpoints/models/{train_config.model_name}'
-                    # os.makedirs(ckpt_dir, exist_ok=True)
-                    # save_ckpt_path = os.path.join(ckpt_dir, f'{train_config.model_name}.pt')
-                    # torch.save(ckpt, save_ckpt_path)
+                    ckpt_dir = f'./checkpoints/models/{train_config.model_name}'
+                    os.makedirs(ckpt_dir, exist_ok=True)
+                    save_ckpt_path = os.path.join(ckpt_dir, f'{train_config.model_name}.pt')
+                    torch.save(ckpt, save_ckpt_path)
 
                     model.eval()    
                     with torch.no_grad():
@@ -135,9 +136,11 @@ def train_gpt2(
             tokens_processed = 0
             start_time = time.time()
         else:
-            total_loss += loss.detach()
-            with model.no_sync():
-                loss.backward()
+
+            if train_config.use_ddp:
+                with model.no_sync():
+                    loss.backward()
+            else: loss.backward()
 
             norm = nn.utils.clip_grad_norm_(model.parameters(), 1.0)
 
