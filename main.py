@@ -18,6 +18,8 @@ if '__main__' == __name__:
     model_config = GPT2Config()
     train_config = TrainConfig()
 
+    ckpt_path = f'./checkpoints/models/{train_config.model_name}/{train_config.model_name}.pt'
+
     tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2-xl")
     tokenizer.add_special_tokens({'pad_token': '<|pad|>'})
 
@@ -27,12 +29,11 @@ if '__main__' == __name__:
             samples["text"], 
             truncation=True, 
             padding='max_length', 
-            max_length=model_config.max_seq_len), 
+            max_length=train_config.seq_len), 
             remove_columns=dataset.features
             )
     dataset = dataset.with_format('torch')
     
-    collate_fn = DataCollatorWithPadding(tokenizer, pad_to_multiple_of=None)
 
     if train_config.use_ddp:
         # torchrun --standalone --nproc_per_node=gpu main.py
@@ -66,7 +67,6 @@ if '__main__' == __name__:
         dataset=dataset, 
         batch_size=train_config.batch_size, 
         num_workers=train_config.num_workers, 
-        collate_fn=collate_fn, 
         pin_memory=True
         )
 
@@ -88,6 +88,15 @@ if '__main__' == __name__:
     
     optimizer = torch.optim.AdamW(model_params, betas=(0.9, 0.95), fused=True)
     criterion = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
+
+    if os.path.exists(ckpt_path):
+        print(f'Loading checkpoint: {ckpt_path}')
+        state_dict = torch.load(ckpt_path)
+        train_config.start_step = state_dict['step']
+        train_config.optimization_step = state_dict['optimization_step']
+        model.load_state_dict(state_dict['model'], strict=True)
+        optimizer.load_state_dict(state_dict['optimizer'])
+        dataloader.load_state_dict(state_dict['dataloader'])
 
     trained_model = train_gpt2(
         model=model,

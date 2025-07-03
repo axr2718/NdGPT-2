@@ -26,8 +26,8 @@ def train_gpt2(
     min_lr = train_config.min_lr
     max_steps = train_config.max_steps
     gradient_accumulation_steps = math.ceil(train_config.gradient_accumulation_steps // world_size)
-    start_step = 0
-    optimization_step = 0
+    start_step = train_config.start_step
+    optimization_step = train_config.optimization_step
     
     if rank == 0:
         last_step = (optimization_step == max_steps - 1)
@@ -72,7 +72,6 @@ def train_gpt2(
             loss.backward()
             norm = nn.utils.clip_grad_norm_(model.parameters(), 1.0)
 
-            optimization_step += 1
             lr = cosine_decay_with_warmup(step=optimization_step, warmup_steps=warmup_steps, max_steps=max_steps, max_lr=max_lr,min_lr=min_lr)
         
             for param_group in optimizer.param_groups:
@@ -107,11 +106,11 @@ def train_gpt2(
             
             #optimization_step += 1
 
-                if optimization_step % 100 == 0:
+                if (optimization_step + 1) % 10 == 0:
                     ckpt = {
                         'step': step + 1,
                         'optimization_step': optimization_step + 1,
-                        'model': model.module.state_dict(),
+                        'model': model.state_dict(),
                         'optimizer': optimizer.state_dict(),
                         'dataloader': dataloader.state_dict(),
                     }
@@ -135,6 +134,7 @@ def train_gpt2(
             total_loss = 0
             tokens_processed = 0
             start_time = time.time()
+            optimization_step += 1
         else:
 
             if train_config.use_ddp:
